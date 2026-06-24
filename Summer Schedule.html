@@ -1,0 +1,1014 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Summer Schedule</title>
+<!-- Firebase SDK (compat) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --pink:   #f472b6;
+    --purple: #a78bfa;
+    --green:  #34d399;
+    --yellow: #fbbf24;
+    --bg:     #fdf4ff;
+    --card:   #fff;
+    --border: #e9d5ff;
+    --text:   #3b0764;
+    --muted:  #9ca3af;
+    --slot-h: 44px; /* height of one 30-min slot */
+  }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding: 20px; }
+
+  .header { text-align: center; margin-bottom: 24px; }
+  .header h1 { font-size: 2rem; font-weight: 800; background: linear-gradient(135deg, var(--pink), var(--purple)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .header .date { font-size: 1.1rem; color: var(--purple); font-weight: 600; margin-top: 4px; }
+
+  .tabs { display: flex; gap: 8px; justify-content: center; margin-bottom: 24px; }
+  .tab { padding: 8px 24px; border-radius: 999px; border: 2px solid var(--border); background: var(--card); cursor: pointer; font-weight: 600; font-size: 0.9rem; color: var(--muted); transition: all 0.15s; }
+  .tab.active { background: linear-gradient(135deg, var(--pink), var(--purple)); color: #fff; border-color: transparent; }
+
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* ── LAYOUT ── */
+  .schedule-layout { display: grid; grid-template-columns: 460px 1fr; gap: 20px; align-items: start; max-width: 1060px; margin: 0 auto; }
+
+  /* ── ACTIVITY BANK ── */
+  .activity-bank { background: var(--card); border: 2px solid var(--border); border-radius: 16px; padding: 12px; position: sticky; top: 20px; overflow: visible; }
+  .activity-bank h3 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 8px; }
+  .bank-grid { columns: 2; column-gap: 8px; }
+  .category-label { column-span: all; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-top: 8px; margin-bottom: 3px; }
+  .activity-chip { display: flex; align-items: center; gap: 4px; padding: 4px 7px; border-radius: 7px; margin-bottom: 4px; cursor: grab; font-size: 0.75rem; font-weight: 600; border: 1.5px solid transparent; user-select: none; break-inside: avoid; transition: opacity 0.1s; }
+  .activity-chip:active { cursor: grabbing; }
+  .activity-chip.dragging { opacity: 0.35; }
+  .activity-chip .icon { font-size: 0.85rem; flex-shrink: 0; }
+  .chip-pts  { font-size: 0.67rem; font-weight: 400; font-style: italic; opacity: 0.85; white-space: nowrap; }
+  .chip-dur  { margin-left: auto; font-size: 0.65rem; font-weight: 400; font-style: italic; opacity: 0.6; white-space: nowrap; }
+
+  .cat-brain { background: #dbeafe; border-color: #bfdbfe; color: #1e40af; }
+  .cat-grow  { background: #d1fae5; border-color: #a7f3d0; color: #065f46; }
+  .cat-body  { background: #fce7f3; border-color: #fbcfe8; color: #831843; }
+  .cat-resp  { background: #ede9fe; border-color: #ddd6fe; color: #4c1d95; }
+  .cat-ded   { background: #fee2e2; border-color: #fecaca; color: #991b1b; }
+
+  /* ── GROWTH OBJECTIVE ── */
+  .growth-section { border-bottom: 2px solid var(--border); }
+  .growth-section-header { background: #d1fae5; padding: 8px 16px; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #065f46; }
+  .growth-cols { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid #a7f3d0; }
+  .growth-col { padding: 10px 12px; min-height: 80px; }
+  .growth-col:first-child { border-right: 1px solid #a7f3d0; }
+  .growth-col-header { font-size: 0.75rem; font-weight: 700; color: #065f46; margin-bottom: 8px; }
+  .growth-drop { min-height: 48px; border-radius: 8px; transition: background 0.1s; }
+  .growth-drop.drag-over { background: #ecfdf5; outline: 2px dashed #34d399; outline-offset: -3px; border-radius: 8px; }
+  .grow-chip-placed { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 8px; font-size: 0.82rem; font-weight: 600; background: #d1fae5; border: 2px solid #a7f3d0; color: #065f46; margin-bottom: 6px; margin-right: 4px; cursor: default; }
+  .grow-chip-placed .remove-btn { background: none; border: none; cursor: pointer; font-size: 0.85rem; opacity: 0.5; padding: 0 0 0 4px; line-height: 1; }
+  .grow-chip-placed .remove-btn:hover { opacity: 1; }
+
+  /* ── CALENDAR (CSS grid) ── */
+  .calendar-col { background: var(--card); border: 2px solid var(--border); border-radius: 16px; overflow: hidden; }
+  .calendar-header { background: linear-gradient(135deg, var(--pink), var(--purple)); color: #fff; padding: 12px 16px; font-weight: 700; font-size: 0.95rem; }
+
+  /* The grid: col 1 = time labels (64px), col 2 = activity area */
+  .cal-grid {
+    display: grid;
+    grid-template-columns: 64px 1fr;
+    position: relative;
+  }
+
+  /* Each half-hour row in the time column */
+  .cal-time-cell {
+    height: var(--slot-h);
+    padding: 4px 8px 0 12px;
+    font-size: 0.72rem;
+    color: var(--muted);
+    font-weight: 600;
+    border-bottom: 1px solid #f3e8ff;
+    border-right: 1px solid #f3e8ff;
+    flex-shrink: 0;
+  }
+  .cal-time-cell:last-child { border-bottom: none; }
+
+  /* Drop column: one big relative container, lines drawn via children */
+  .cal-drop-col {
+    position: relative;
+    /* total height = num slots × slot height */
+  }
+
+  /* Horizontal grid lines inside drop column */
+  .cal-line {
+    position: absolute;
+    left: 0; right: 0;
+    border-bottom: 1px solid #f3e8ff;
+    pointer-events: none;
+  }
+  /* Hour lines slightly darker */
+  .cal-line.hour { border-bottom-color: #e9d5ff; }
+
+  /* Invisible drop zones — one per slot, stacked */
+  .drop-zone {
+    position: absolute;
+    left: 0; right: 0;
+    height: var(--slot-h);
+    transition: background 0.1s;
+  }
+  .drop-zone.drag-over {
+    background: #fdf4ff;
+    outline: 2px dashed var(--purple);
+    outline-offset: -3px;
+    border-radius: 6px;
+    z-index: 5;
+  }
+
+  /* Placed activity blocks */
+  .placed-block {
+    position: absolute;
+    left: 4px; right: 4px;
+    border-radius: 10px;
+    padding: 6px 10px;
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    font-size: 0.83rem;
+    font-weight: 600;
+    cursor: grab;
+    z-index: 10;
+    overflow: hidden;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+  .placed-block:active { cursor: grabbing; }
+  .placed-block.dragging { opacity: 0.35; }
+  .placed-block .blk-icon { font-size: 1rem; flex-shrink: 0; margin-top: 1px; }
+  .placed-block .blk-text { flex: 1; min-width: 0; }
+  .placed-block .blk-label { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .placed-block .blk-meta  { font-size: 0.7rem; opacity: 0.7; }
+  .placed-block .remove-btn { background: none; border: none; cursor: pointer; font-size: 0.9rem; opacity: 0.5; padding: 0; line-height: 1; flex-shrink: 0; }
+  .placed-block .remove-btn:hover { opacity: 1; }
+
+  /* REVIEW */
+  .review-controls { max-width: 1060px; margin: 0 auto 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .review-controls h2 { font-size: 1.1rem; font-weight: 700; color: var(--purple); }
+  .btn { padding: 8px 20px; border-radius: 999px; border: none; cursor: pointer; font-weight: 700; font-size: 0.88rem; transition: all 0.15s; }
+  .btn-primary   { background: linear-gradient(135deg, var(--pink), var(--purple)); color: #fff; }
+  .btn-secondary { background: var(--card); border: 2px solid var(--border); color: var(--purple); }
+  .review-grid { max-width: 1060px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; }
+  .review-item { background: var(--card); border: 2px solid var(--border); border-radius: 12px; padding: 10px 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .review-item .time-badge { font-size: 0.75rem; color: var(--muted); min-width: 60px; }
+  .review-item .chip-preview { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 0.88rem; padding: 4px 10px; border-radius: 8px; flex: 1; }
+  .review-item .pts-badge { font-size: 0.75rem; font-weight: 700; color: var(--purple); white-space: nowrap; }
+  .toggle-row { display: flex; gap: 6px; }
+  .outcome-btn { padding: 5px 12px; border-radius: 999px; border: 2px solid var(--border); background: var(--card); cursor: pointer; font-size: 0.78rem; font-weight: 700; transition: all 0.15s; }
+  .outcome-btn.yes.active     { background: var(--green);  border-color: var(--green);  color: #fff; }
+  .outcome-btn.no.active      { background: #f87171;       border-color: #f87171;       color: #fff; }
+  .outcome-btn.partial.active { background: var(--yellow); border-color: var(--yellow); color: #fff; }
+
+  /* SCORECARD */
+  .scorecard-layout { max-width: 700px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+  .score-card { background: var(--card); border: 2px solid var(--border); border-radius: 16px; overflow: hidden; }
+  .score-card-header { padding: 12px 16px; font-weight: 700; font-size: 1rem; background: linear-gradient(135deg, #f472b622, #a78bfa22); border-bottom: 2px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  .score-card-header .points-total { font-size: 1.4rem; font-weight: 800; color: var(--purple); }
+  .score-table { width: 100%; border-collapse: collapse; }
+  .score-table th { padding: 8px 16px; text-align: left; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); border-bottom: 1px solid var(--border); }
+  .score-table td { padding: 10px 16px; border-bottom: 1px solid #f3e8ff; font-size: 0.88rem; }
+  .score-table tr:last-child td { border-bottom: none; }
+  .pts-pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-weight: 700; font-size: 0.78rem; }
+  .pts-done    { background: #d1fae5; color: #065f46; }
+  .pts-partial { background: #fef3c7; color: #92400e; }
+  .pts-missed  { background: #fee2e2; color: #991b1b; }
+  .treat-bar-wrap { padding: 16px; }
+  .treat-bar-label { font-size: 0.85rem; font-weight: 600; margin-bottom: 8px; display: flex; justify-content: space-between; }
+  .treat-bar-track { height: 18px; background: #f3e8ff; border-radius: 999px; overflow: hidden; }
+  .treat-bar-fill  { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--pink), var(--purple)); transition: width 0.4s; }
+  .weekly-row { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; padding: 16px; }
+  .day-pip { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 0.7rem; color: var(--muted); font-weight: 600; }
+  .day-pip .circle { width: 32px; height: 32px; border-radius: 50%; border: 2px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; }
+  .day-pip .circle.earned { background: linear-gradient(135deg, var(--pink), var(--purple)); color: #fff; border-color: transparent; }
+  .day-pip .circle.today  { border-color: var(--purple); color: var(--purple); }
+  .prize-tier { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; font-size: 0.88rem; }
+  .prize-tier:last-child { border-bottom: none; }
+  .prize-icon { font-size: 1.4rem; }
+  .prize-info { flex: 1; }
+  .prize-name { font-weight: 700; }
+  .prize-req  { font-size: 0.78rem; color: var(--muted); margin-top: 1px; }
+  .prize-status { font-size: 0.8rem; font-weight: 700; }
+
+  .empty-state { text-align: center; color: var(--muted); padding: 32px 16px; font-size: 0.9rem; }
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px); background: var(--text); color: #fff; padding: 10px 24px; border-radius: 999px; font-weight: 600; font-size: 0.9rem; transition: transform 0.3s; z-index: 999; }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+
+  @media (max-width: 700px) {
+    .schedule-layout { grid-template-columns: 1fr; }
+    .activity-bank { position: static; max-height: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>☀️ Summer Schedule</h1>
+  <div class="date" id="dateDisplay"></div>
+  <div id="syncStatus" style="font-size:0.72rem;margin-top:6px;color:#9ca3af;">⏳ Connecting to cloud…</div>
+</div>
+
+<div class="tabs">
+  <button class="tab active" onclick="showPage('plan',this)">📋 Plan the Day</button>
+  <button class="tab" onclick="showPage('review',this)">✅ End of Day</button>
+  <button class="tab" onclick="showPage('score',this)">🏆 Scorecard</button>
+</div>
+
+<!-- PAGE 1: PLAN -->
+<div id="page-plan" class="page active">
+  <div class="schedule-layout">
+
+    <div class="activity-bank">
+      <h3>Activities</h3>
+      <div class="bank-grid">
+
+        <div class="category-label">🌱 Grow</div>
+        <div class="activity-chip cat-grow" draggable="true" data-id="sayhi"    data-cat="grow" data-label="Say Hi"          data-icon="👋" data-dur="0" data-pts="5"><span class="icon">👋</span> Say Hi          <span class="chip-pts">+5pt</span></div>
+        <div class="activity-chip cat-grow" draggable="true" data-id="playnew"  data-cat="grow" data-label="Play w/ Someone New" data-icon="🤝" data-dur="0" data-pts="7"><span class="icon">🤝</span> Play w/ Someone New <span class="chip-pts">+7pt</span></div>
+        <div class="activity-chip cat-grow" draggable="true" data-id="emotions" data-cat="grow" data-label="Manage Emotions" data-icon="🧠" data-dur="0" data-pts="5"><span class="icon">🧠</span> Manage Emotions <span class="chip-pts">+5pt</span></div>
+
+        <div class="category-label">🧠 Brain</div>
+        <div class="activity-chip cat-brain" draggable="true" data-id="read"     data-cat="brain" data-label="Read"          data-icon="📖" data-dur="30"  data-pts="1"><span class="icon">📖</span> Read          <span class="chip-pts">+1pt</span><span class="chip-dur">30m</span></div>
+        <div class="activity-chip cat-brain" draggable="true" data-id="journal"  data-cat="brain" data-label="Write/Journal" data-icon="✏️" data-dur="30"  data-pts="1"><span class="icon">✏️</span> Write/Journal <span class="chip-pts">+1pt</span><span class="chip-dur">30m</span></div>
+        <div class="activity-chip cat-brain" draggable="true" data-id="workbook" data-cat="brain" data-label="Workbook"      data-icon="📓" data-dur="30"  data-pts="1"><span class="icon">📓</span> Workbook      <span class="chip-pts">+1pt</span><span class="chip-dur">30m</span></div>
+        <div class="activity-chip cat-brain" draggable="true" data-id="science"  data-cat="brain" data-label="Science"       data-icon="🔬" data-dur="60"  data-pts="1"><span class="icon">🔬</span> Science       <span class="chip-pts">+1pt</span><span class="chip-dur">1h</span></div>
+        <div class="activity-chip cat-brain" draggable="true" data-id="yoga"     data-cat="brain" data-label="Yoga"          data-icon="🧘" data-dur="30"  data-pts="1"><span class="icon">🧘</span> Yoga          <span class="chip-pts">+1pt</span><span class="chip-dur">30m</span></div>
+        <div class="activity-chip cat-brain" draggable="true" data-id="museum"   data-cat="brain" data-label="Museum"        data-icon="🏛️" data-dur="180" data-pts="1"><span class="icon">🏛️</span> Museum        <span class="chip-pts">+1pt</span><span class="chip-dur">3h</span></div>
+        <div class="activity-chip cat-brain" draggable="true" data-id="library"  data-cat="brain" data-label="Library"       data-icon="📚" data-dur="120" data-pts="1"><span class="icon">📚</span> Library       <span class="chip-pts">+1pt</span><span class="chip-dur">2h</span></div>
+
+        <div class="category-label">💪 Body</div>
+        <div class="activity-chip cat-body" draggable="true" data-id="pool"       data-cat="body" data-label="Pool"          data-icon="🏊" data-dur="120" data-pts="1"><span class="icon">🏊</span> Pool          <span class="chip-pts">+1pt</span><span class="chip-dur">2h</span></div>
+        <div class="activity-chip cat-body" draggable="true" data-id="bike"       data-cat="body" data-label="Bike"          data-icon="🚲" data-dur="60"  data-pts="1"><span class="icon">🚲</span> Bike          <span class="chip-pts">+1pt</span><span class="chip-dur">1h</span></div>
+        <div class="activity-chip cat-body" draggable="true" data-id="kidsplay"   data-cat="body" data-label="KidsPlay"     data-icon="🛝" data-dur="120" data-pts="1"><span class="icon">🛝</span> KidsPlay     <span class="chip-pts">+1pt</span><span class="chip-dur">2h</span></div>
+        <div class="activity-chip cat-body" draggable="true" data-id="gymnastics" data-cat="body" data-label="Gymnastics"    data-icon="🤸" data-dur="120" data-pts="1"><span class="icon">🤸</span> Gymnastics    <span class="chip-pts">+1pt</span><span class="chip-dur">2h</span></div>
+        <div class="activity-chip cat-body" draggable="true" data-id="playground" data-cat="body" data-label="Playground"    data-icon="🛝" data-dur="90"  data-pts="1"><span class="icon">🛝</span> Playground    <span class="chip-pts">+1pt</span><span class="chip-dur">90m</span></div>
+        <div class="activity-chip cat-body" draggable="true" data-id="hike"       data-cat="body" data-label="Hike"          data-icon="🥾" data-dur="90"  data-pts="1"><span class="icon">🥾</span> Hike          <span class="chip-pts">+1pt</span><span class="chip-dur">90m</span></div>
+        <div class="activity-chip cat-body" draggable="true" data-id="lake"       data-cat="body" data-label="Lake Compounce" data-icon="🔥" data-dur="240" data-pts="1"><span class="icon">🔥</span> Lake Compounce <span class="chip-pts">+1pt</span><span class="chip-dur">4h</span></div>
+        <div class="activity-chip cat-body" draggable="true" data-id="momact"     data-cat="body" data-label="Mom Activity"  data-icon="⭐" data-dur="60"  data-pts="1"><span class="icon">⭐</span> Mom Activity  <span class="chip-pts">+1pt</span><span class="chip-dur">1h</span></div>
+        <div class="activity-chip cat-body" draggable="true" data-id="playhome"   data-cat="body" data-label="Play at Home"  data-icon="🏠" data-dur="120" data-pts="1"><span class="icon">🏠</span> Play at Home  <span class="chip-pts">+1pt</span><span class="chip-dur">2h</span></div>
+        <div class="activity-chip cat-body" draggable="true" data-id="artscrafts" data-cat="body" data-label="Arts & Crafts" data-icon="🎨" data-dur="60"  data-pts="1"><span class="icon">🎨</span> Arts &amp; Crafts <span class="chip-pts">+1pt</span><span class="chip-dur">1h</span></div>
+        <div class="activity-chip cat-body" draggable="true" data-id="rest"       data-cat="body" data-label="Rest"          data-icon="😴" data-dur="90"  data-pts="1"><span class="icon">😴</span> Rest          <span class="chip-pts">+1pt</span><span class="chip-dur">90m</span></div>
+        <div class="activity-chip cat-body" draggable="true" data-id="sports"     data-cat="body" data-label="Sports"        data-icon="🏅" data-dur="60"  data-pts="1"><span class="icon">🏅</span> Sports        <span class="chip-pts">+1pt</span><span class="chip-dur">1h</span></div>
+
+        <div class="category-label">🧹 Responsibilities</div>
+        <div class="activity-chip cat-resp" draggable="true" data-id="clean"  data-cat="resp" data-label="Clean"       data-icon="🧹" data-dur="30" data-pts="2"><span class="icon">🧹</span> Clean       <span class="chip-pts">+2pt</span><span class="chip-dur">30m</span></div>
+        <div class="activity-chip cat-resp" draggable="true" data-id="cat"    data-cat="resp" data-label="Cat"         data-icon="🐱" data-dur="15" data-pts="2"><span class="icon">🐱</span> Cat         <span class="chip-pts">+2pt</span><span class="chip-dur">15m</span></div>
+        <div class="activity-chip cat-resp" draggable="true" data-id="chores" data-cat="resp" data-label="Chores"      data-icon="🧺" data-dur="30" data-pts="2"><span class="icon">🧺</span> Chores      <span class="chip-pts">+2pt</span><span class="chip-dur">30m</span></div>
+        <div class="activity-chip cat-resp" draggable="true" data-id="appt"   data-cat="resp" data-label="Appointment" data-icon="📅" data-dur="90" data-pts="1"><span class="icon">📅</span> Appointment <span class="chip-pts">+1pt</span><span class="chip-dur">90m</span></div>
+
+        <div class="category-label">⚠️ Deductions</div>
+        <div class="activity-chip cat-ded" draggable="true" data-id="yell"    data-cat="ded" data-label="Yell / Fight" data-icon="😤" data-dur="0" data-pts="-3"><span class="icon">😤</span> Yell / Fight <span class="chip-pts">−3pt</span></div>
+        <div class="activity-chip cat-ded" draggable="true" data-id="throw"   data-cat="ded" data-label="Throw"        data-icon="🪃" data-dur="0" data-pts="-2"><span class="icon">🪃</span> Throw        <span class="chip-pts">−2pt</span></div>
+        <div class="activity-chip cat-ded" draggable="true" data-id="disobey" data-cat="ded" data-label="Disobey"      data-icon="🚫" data-dur="0" data-pts="-2"><span class="icon">🚫</span> Disobey      <span class="chip-pts">−2pt</span></div>
+
+      </div>
+    </div>
+
+    <!-- Calendar -->
+    <div class="calendar-col">
+      <div class="calendar-header">Today's Schedule</div>
+
+      <!-- Growth Objective -->
+      <div class="growth-section">
+        <div class="growth-section-header">🌱 Growth Objective</div>
+        <div class="growth-cols">
+          <div class="growth-col">
+            <div class="growth-col-header">Adeline</div>
+            <div class="growth-drop" id="growDrop-adeline" data-kid="adeline"></div>
+          </div>
+          <div class="growth-col">
+            <div class="growth-col-header">Amelia</div>
+            <div class="growth-drop" id="growDrop-amelia" data-kid="amelia"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cal-grid" id="calGrid"></div>
+    </div>
+  </div>
+</div>
+
+<!-- PAGE 2: REVIEW -->
+<div id="page-review" class="page">
+  <div class="review-controls">
+    <h2>How did today go?</h2>
+    <button class="btn btn-secondary" onclick="markAll('yes')">✅ All Done</button>
+    <button class="btn btn-primary"   onclick="saveReview()">Save &amp; Score</button>
+    <button class="btn btn-secondary" onclick="archiveDay()" style="font-size:0.8rem;">💾 Save Day to History</button>
+  </div>
+  <div class="review-grid" id="reviewGrid">
+    <div class="empty-state">Plan your day first, then come back here!</div>
+  </div>
+</div>
+
+<!-- PAGE 3: SCORECARD -->
+<div id="page-score" class="page">
+  <div class="scorecard-layout">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+      <div class="score-card">
+        <div class="score-card-header" style="background:linear-gradient(135deg,#ede9fe,#ddd6fe);">
+          <span>🟣 Adeline</span>
+          <span class="points-total" id="adelinePointsDisplay">0 pts</span>
+        </div>
+        <table class="score-table">
+          <thead><tr><th>Activity</th><th>Result</th><th>Pts</th></tr></thead>
+          <tbody id="adelineRows"><tr><td colspan="3" style="color:#9ca3af;padding:12px;text-align:center;font-size:0.82rem">Nothing scored yet</td></tr></tbody>
+        </table>
+      </div>
+      <div class="score-card">
+        <div class="score-card-header" style="background:linear-gradient(135deg,#fce7f3,#fbcfe8);">
+          <span>🩷 Amelia</span>
+          <span class="points-total" id="ameliaPointsDisplay">0 pts</span>
+        </div>
+        <table class="score-table">
+          <thead><tr><th>Activity</th><th>Result</th><th>Pts</th></tr></thead>
+          <tbody id="ameliaRows"><tr><td colspan="3" style="color:#9ca3af;padding:12px;text-align:center;font-size:0.82rem">Nothing scored yet</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="score-card" style="display:none"><span id="todayPointsDisplay">0</span></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+      <div class="score-card">
+        <div class="score-card-header" style="background:linear-gradient(135deg,#ede9fe,#ddd6fe);">🍦 Adeline's Treat</div>
+        <div class="treat-bar-wrap">
+          <div class="treat-bar-label"><span id="treatLabelA">10 points to earn a treat</span><span id="treatPctA">0%</span></div>
+          <div class="treat-bar-track"><div class="treat-bar-fill" id="treatBarFillA" style="width:0%;background:linear-gradient(90deg,#a78bfa,#7c3aed)"></div></div>
+          <div style="margin-top:8px;font-size:0.82rem;color:#6b7280" id="treatStatusA">Keep going! 💪</div>
+        </div>
+      </div>
+      <div class="score-card">
+        <div class="score-card-header" style="background:linear-gradient(135deg,#fce7f3,#fbcfe8);">🍦 Amelia's Treat</div>
+        <div class="treat-bar-wrap">
+          <div class="treat-bar-label"><span id="treatLabelB">10 points to earn a treat</span><span id="treatPctB">0%</span></div>
+          <div class="treat-bar-track"><div class="treat-bar-fill" id="treatBarFillB" style="width:0%;background:linear-gradient(90deg,#f472b6,#db2777)"></div></div>
+          <div style="margin-top:8px;font-size:0.82rem;color:#6b7280" id="treatStatusB">Keep going! 💪</div>
+        </div>
+      </div>
+    </div>
+    <div class="score-card">
+      <div class="score-card-header"><span>📅 This Week</span><span style="font-size:0.85rem;font-weight:600;color:#a78bfa" id="weeklyPtsDisplay">0 pts total</span></div>
+      <div class="weekly-row" id="weeklyRow"></div>
+    </div>
+    <div class="score-card">
+      <div class="score-card-header">🎁 Prize Tiers</div>
+      <div class="prize-tier"><div class="prize-icon">⭐</div><div class="prize-info"><div class="prize-name">Small Treat</div><div class="prize-req">10+ points in a day</div></div><div class="prize-status" id="tier1">🔒 Locked</div></div>
+      <div class="prize-tier"><div class="prize-icon">🌟</div><div class="prize-info"><div class="prize-name">Movie Night Pick</div><div class="prize-req">3 treat days this week</div></div><div class="prize-status" id="tier2">🔒 Locked</div></div>
+      <div class="prize-tier"><div class="prize-icon">🏆</div><div class="prize-info"><div class="prize-name">Big Prize (your choice!)</div><div class="prize-req">5 treat days this week</div></div><div class="prize-status" id="tier3">🔒 Locked</div></div>
+    </div>
+    <div style="text-align:center;padding:8px 0 4px;">
+      <button class="btn btn-secondary" onclick="showHistory()" style="font-size:0.85rem;">📂 View History</button>
+    </div>
+  </div>
+</div>
+
+<!-- HISTORY MODAL -->
+<div id="historyOverlay" style="display:none;position:fixed;inset:0;background:rgba(59,7,100,0.35);z-index:200;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:20px;width:min(700px,95vw);max-height:85vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,0.18);">
+    <div style="background:linear-gradient(135deg,#f472b6,#a78bfa);color:#fff;padding:14px 20px;border-radius:20px 20px 0 0;display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-weight:700;font-size:1rem;">📂 Score History</span>
+      <button onclick="closeHistory()" style="background:none;border:none;color:#fff;font-size:1.3rem;cursor:pointer;line-height:1;">✕</button>
+    </div>
+    <div id="historyContent" style="padding:20px;"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── CONFIG ───────────────────────────────────────────────
+const START_HOUR   = 7;        // 7:00 AM
+const END_HOUR     = 20.5;     // 8:30 PM
+const SLOT_MIN     = 30;       // each slot = 30 minutes
+const SLOT_H_PX    = 44;       // must match CSS --slot-h
+const TREAT_THRESHOLD = 10;
+
+const NUM_SLOTS = (END_HOUR - START_HOUR) * (60 / SLOT_MIN); // 27
+
+function slotLabel(i) {
+  const totalMin = START_HOUR * 60 + i * SLOT_MIN;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12  = h > 12 ? h - 12 : h;
+  return `${h12}:${m.toString().padStart(2,'0')} ${ampm}`;
+}
+
+function slotLabelSimple(i) {
+  const totalMin = START_HOUR * 60 + i * SLOT_MIN;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (m !== 0) return ''; // only show on the hour
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12  = h > 12 ? h - 12 : h === 0 ? 12 : h;
+  return `${h12} ${ampm}`;
+}
+
+function durToSlots(durMin) {
+  return Math.max(1, Math.ceil(durMin / SLOT_MIN));
+}
+
+// ══════════════════════════════════════════════════════════
+// FIREBASE CONFIG — paste your project's firebaseConfig here
+// Get this from: Firebase Console → Project Settings → Your Apps
+// ══════════════════════════════════════════════════════════
+const FIREBASE_CONFIG = {
+  apiKey:            "AIzaSyCLZzg-6bAtwHmkkOfFY4pd1w1CZ4he_SY",
+  authDomain:        "summer-schedule-f1512.firebaseapp.com",
+  databaseURL:       "https://summer-schedule-f1512-default-rtdb.firebaseio.com",
+  projectId:         "summer-schedule-f1512",
+  storageBucket:     "summer-schedule-f1512.firebasestorage.app",
+  messagingSenderId: "704511306967",
+  appId:             "1:704511306967:web:e6e3c695fd90f734da1492"
+};
+
+// ── FIREBASE INIT ─────────────────────────────────────────
+let db = null;
+let firebaseReady = false;
+
+function initFirebase() {
+  try {
+    if (FIREBASE_CONFIG.apiKey === 'PASTE_YOUR_API_KEY') {
+      setSyncStatus('⚠️ Firebase not configured — saving locally only', '#d97706');
+      return;
+    }
+    firebase.initializeApp(FIREBASE_CONFIG);
+    db = firebase.database();
+    // Monitor connection state
+    db.ref('.info/connected').on('value', snap => {
+      if (snap.val()) {
+        firebaseReady = true;
+        setSyncStatus('☁️ Cloud sync active', '#16a34a');
+        // Pull latest state from Firebase on connect
+        pullStateFromFirebase();
+      } else {
+        setSyncStatus('📴 Offline — saving locally', '#d97706');
+      }
+    });
+  } catch(e) {
+    console.error('Firebase init failed:', e);
+    setSyncStatus('⚠️ Firebase error — saving locally', '#dc2626');
+  }
+}
+
+function setSyncStatus(msg, color) {
+  const el = document.getElementById('syncStatus');
+  if (el) { el.textContent = msg; el.style.color = color; }
+}
+
+function todayKey() {
+  return new Date().toISOString().slice(0, 10); // e.g. "2026-06-24"
+}
+
+// Pull today's state from Firebase and refresh UI
+function pullStateFromFirebase() {
+  if (!db) return;
+  db.ref('days/' + todayKey()).once('value').then(snap => {
+    const remote = snap.val();
+    if (remote) {
+      state.schedule = remote.schedule || {};
+      state.review   = remote.review   || {};
+      state.grow     = remote.grow     || { adeline: [], amelia: [] };
+      state.weekDays = remote.weekDays || [false,false,false,false,false,false,false];
+      saveLocal(state); // keep local in sync
+      buildCalendar();
+      initGrowthDrops();
+      setSyncStatus('☁️ Synced from cloud — ' + new Date().toLocaleTimeString(), '#16a34a');
+    }
+  }).catch(e => console.warn('Firebase pull failed:', e));
+}
+
+// ── STATE ─────────────────────────────────────────────────
+function saveLocal(s)  { try { localStorage.setItem('summerSched3', JSON.stringify(s)); } catch {} }
+function loadLocal()   { try { return JSON.parse(localStorage.getItem('summerSched3') || '{}'); } catch { return {}; } }
+
+function saveState(s) {
+  saveLocal(s);
+  if (db && firebaseReady) {
+    db.ref('days/' + todayKey()).set({
+      schedule: s.schedule || {},
+      review:   s.review   || {},
+      grow:     s.grow     || { adeline: [], amelia: [] },
+      weekDays: s.weekDays || [false,false,false,false,false,false,false],
+      updatedAt: Date.now()
+    }).catch(e => { console.warn('Firebase save failed:', e); setSyncStatus('⚠️ Cloud save failed — saved locally', '#dc2626'); });
+  }
+}
+
+function loadHistory() { try { return JSON.parse(localStorage.getItem('summerSchedHistory') || '{}'); } catch { return {}; } }
+function saveHistoryLocal(h) { try { localStorage.setItem('summerSchedHistory', JSON.stringify(h)); } catch {} }
+
+// Archive today's data to history
+function archiveDay(label) {
+  const dateKey = label || todayKey();
+  const entry = {
+    date:      dateKey,
+    schedule:  JSON.parse(JSON.stringify(state.schedule)),
+    grow:      JSON.parse(JSON.stringify(state.grow)),
+    review:    JSON.parse(JSON.stringify(state.review)),
+    adelinePts: calcKidPoints('adeline'),
+    ameliaPts:  calcKidPoints('amelia'),
+    savedAt:    Date.now()
+  };
+  // Save locally
+  const hist = loadHistory();
+  hist[dateKey] = entry;
+  saveHistoryLocal(hist);
+  // Save to Firebase
+  if (db && firebaseReady) {
+    db.ref('history/' + dateKey).set(entry)
+      .then(() => { setSyncStatus('☁️ Day archived to cloud!', '#16a34a'); alert('Day saved to history!'); })
+      .catch(() => { alert('Day saved locally (cloud sync failed).'); });
+  } else {
+    alert('Day saved to history!');
+  }
+}
+
+function renderHistoryData(hist) {
+  const keys = Object.keys(hist).sort().reverse();
+  const el = document.getElementById('historyContent');
+  if (!keys.length) {
+    el.innerHTML = '<p style="text-align:center;color:#9ca3af;padding:20px">No history saved yet. Use "Save Day to History" to archive a day.</p>';
+    return;
+  }
+  el.innerHTML = keys.map(k => {
+    const d = hist[k];
+    const dateLabel = new Date(k + 'T12:00:00').toLocaleDateString('en-US', {weekday:'long', month:'long', day:'numeric', year:'numeric'});
+    const schEntries = Object.entries(d.schedule || {});
+    const badge = o => o === 'yes' ? '<span style="color:#16a34a">✓ Done</span>' : o === 'partial' ? '<span style="color:#d97706">½ Partial</span>' : '<span style="color:#9ca3af">✗ Missed</span>';
+    const reviewRows = schEntries.map(([si, act]) => {
+      const aOut = (d.review || {})[si + '-adeline'] || 'no';
+      const mOut = (d.review || {})[si + '-amelia']  || 'no';
+      return `<tr><td style="padding:4px 8px">${act.icon||''} ${act.label||''}</td><td style="padding:4px 8px;text-align:center">${badge(aOut)}</td><td style="padding:4px 8px;text-align:center">${badge(mOut)}</td></tr>`;
+    }).join('');
+    const growRows = [...(d.grow?.adeline||[]).map(a => {
+      const o = (d.review || {})['grow-adeline-' + a.id] || 'no';
+      return `<tr><td style="padding:4px 8px">🌱 ${a.label} (Adeline)</td><td style="padding:4px 8px;text-align:center">${o==='yes'?'<span style="color:#16a34a">✓</span>':'<span style="color:#9ca3af">✗</span>'}</td><td></td></tr>`;
+    }), ...(d.grow?.amelia||[]).map(a => {
+      const o = (d.review || {})['grow-amelia-' + a.id] || 'no';
+      return `<tr><td style="padding:4px 8px">🌱 ${a.label} (Amelia)</td><td></td><td style="padding:4px 8px;text-align:center">${o==='yes'?'<span style="color:#16a34a">✓</span>':'<span style="color:#9ca3af">✗</span>'}</td></tr>`;
+    })].join('');
+    return `
+      <div style="margin-bottom:24px;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
+        <div style="background:linear-gradient(135deg,#ede9fe,#fce7f3);padding:10px 16px;display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-weight:700;font-size:0.95rem">📅 ${dateLabel}</span>
+          <span style="font-size:0.85rem;color:#6b7280">Adeline: <strong style="color:#7c3aed">${d.adelinePts||0}pts</strong> &nbsp; Amelia: <strong style="color:#db2777">${d.ameliaPts||0}pts</strong></span>
+        </div>
+        ${(schEntries.length||growRows) ? `<table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+          <thead><tr style="background:#f9fafb"><th style="padding:4px 8px;text-align:left">Activity</th><th style="padding:4px 8px">Adeline</th><th style="padding:4px 8px">Amelia</th></tr></thead>
+          <tbody>${reviewRows}${growRows}</tbody>
+        </table>` : '<p style="padding:12px;color:#9ca3af;font-size:0.82rem">No activities recorded.</p>'}
+      </div>`;
+  }).join('');
+}
+
+function showHistory() {
+  const el = document.getElementById('historyContent');
+  el.innerHTML = '<p style="text-align:center;color:#9ca3af;padding:20px">Loading…</p>';
+  document.getElementById('historyOverlay').style.display = 'flex';
+
+  if (db && firebaseReady) {
+    db.ref('history').once('value').then(snap => {
+      const fbHist = snap.val() || {};
+      // Merge with local history
+      const localHist = loadHistory();
+      const merged = Object.assign({}, localHist, fbHist);
+      renderHistoryData(merged);
+    }).catch(() => renderHistoryData(loadHistory()));
+  } else {
+    renderHistoryData(loadHistory());
+  }
+}
+
+
+function closeHistory() {
+  document.getElementById('historyOverlay').style.display = 'none';
+}
+
+// Load from localStorage first (instant); Firebase will overwrite once connected
+let state = loadLocal();
+if (!state.schedule) state.schedule = {};
+if (!state.review)   state.review   = {};
+if (!state.weekDays) state.weekDays = [false,false,false,false,false,false,false];
+if (!state.grow)     state.grow     = { adeline: [], amelia: [] };
+
+// ── DATE ──────────────────────────────────────────────────
+const today = new Date();
+document.getElementById('dateDisplay').textContent =
+  today.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
+
+// ── TABS ──────────────────────────────────────────────────
+function showPage(name, btn) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  if (btn) btn.classList.add('active');
+  if (name === 'review') renderReview();
+  if (name === 'score')  renderScore();
+}
+
+// ── CALENDAR BUILD ────────────────────────────────────────
+function buildCalendar() {
+  const grid = document.getElementById('calGrid');
+  grid.innerHTML = '';
+
+  const totalH = NUM_SLOTS * SLOT_H_PX;
+
+  // Left column: time labels
+  const timeCol = document.createElement('div');
+  timeCol.style.cssText = 'display:flex;flex-direction:column;';
+  for (let i = 0; i < NUM_SLOTS; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'cal-time-cell';
+    const lbl = slotLabelSimple(i);
+    cell.textContent = lbl;
+    if (!lbl) cell.style.borderBottomColor = '#f9f0ff'; // subtle half-hour line
+    timeCol.appendChild(cell);
+  }
+  grid.appendChild(timeCol);
+
+  // Right column: drop area
+  const dropCol = document.createElement('div');
+  dropCol.className = 'cal-drop-col';
+  dropCol.style.height = totalH + 'px';
+
+  // Grid lines
+  for (let i = 0; i <= NUM_SLOTS; i++) {
+    const line = document.createElement('div');
+    line.className = 'cal-line' + (i % 2 === 0 ? ' hour' : '');
+    line.style.top = (i * SLOT_H_PX) + 'px';
+    dropCol.appendChild(line);
+  }
+
+  // Drop zones
+  for (let i = 0; i < NUM_SLOTS; i++) {
+    const zone = document.createElement('div');
+    zone.className = 'drop-zone';
+    zone.style.top = (i * SLOT_H_PX) + 'px';
+    zone.dataset.slot = i;
+
+    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+    zone.addEventListener('drop', e => {
+      e.preventDefault();
+      zone.classList.remove('drag-over');
+      const raw = e.dataTransfer.getData('text/plain');
+      if (!raw) return;
+      const data = JSON.parse(raw);
+
+      // Remove old block if moving
+      if (data.fromSlot !== undefined) {
+        delete state.schedule[data.fromSlot];
+        const old = dropCol.querySelector(`.placed-block[data-slot="${data.fromSlot}"]`);
+        if (old) old.remove();
+      }
+
+      // Check it fits
+      const slots = durToSlots(data.dur);
+      if (i + slots > NUM_SLOTS) return; // doesn't fit
+
+      state.schedule[i] = { id: data.id, label: data.label, icon: data.icon, cat: data.cat, pts: data.pts, dur: data.dur };
+      saveState(state);
+      renderBlock(dropCol, i, state.schedule[i]);
+    });
+
+    dropCol.appendChild(zone);
+  }
+
+  grid.appendChild(dropCol);
+
+  // Render saved blocks
+  Object.entries(state.schedule).forEach(([slotIdx, act]) => {
+    renderBlock(dropCol, Number(slotIdx), act);
+  });
+}
+
+function renderBlock(dropCol, slotIdx, data) {
+  // Remove existing block at this slot
+  const existing = dropCol.querySelector(`.placed-block[data-slot="${slotIdx}"]`);
+  if (existing) existing.remove();
+
+  const slots  = durToSlots(data.dur);
+  const height = slots * SLOT_H_PX - 4; // small gap
+  const top    = slotIdx * SLOT_H_PX + 2;
+
+  const durLabel = data.dur >= 60 ? (data.dur / 60) + 'h' : data.dur + 'm';
+
+  const block = document.createElement('div');
+  block.className = `placed-block cat-${data.cat}`;
+  block.dataset.slot = slotIdx;
+  block.draggable = true;
+  block.style.top    = top + 'px';
+  block.style.height = height + 'px';
+  block.innerHTML = `
+    <span class="blk-icon">${data.icon}</span>
+    <span class="blk-text">
+      <span class="blk-label">${data.label} <span style="font-weight:400;font-style:italic">+${data.pts}pt</span></span>
+      <span class="blk-meta">${durLabel}</span>
+    </span>
+    <button class="remove-btn" title="Remove">✕</button>`;
+
+  block.addEventListener('dragstart', e => {
+    block.classList.add('dragging');
+    e.dataTransfer.setData('text/plain', JSON.stringify({ ...data, fromSlot: slotIdx }));
+  });
+  block.addEventListener('dragend', () => block.classList.remove('dragging'));
+  block.querySelector('.remove-btn').addEventListener('click', () => {
+    delete state.schedule[slotIdx];
+    saveState(state);
+    block.remove();
+  });
+
+  dropCol.appendChild(block);
+}
+
+// ── BANK DRAG ─────────────────────────────────────────────
+function initBankDrag() {
+  document.querySelectorAll('.activity-chip').forEach(chip => {
+    chip.addEventListener('dragstart', e => {
+      chip.classList.add('dragging');
+      e.dataTransfer.setData('text/plain', JSON.stringify({
+        id:    chip.dataset.id,
+        label: chip.dataset.label,
+        icon:  chip.dataset.icon,
+        cat:   chip.dataset.cat,
+        pts:   Number(chip.dataset.pts),
+        dur:   Number(chip.dataset.dur)
+      }));
+    });
+    chip.addEventListener('dragend', () => chip.classList.remove('dragging'));
+  });
+}
+
+// ── REVIEW ────────────────────────────────────────────────
+function renderReview() {
+  const grid = document.getElementById('reviewGrid');
+  const scheduled = Object.entries(state.schedule);
+  const growItems = [
+    ...( state.grow.adeline || []).map(a => ({ ...a, kid: 'Adeline' })),
+    ...( state.grow.amelia  || []).map(a => ({ ...a, kid: 'Amelia'  }))
+  ];
+  if (!scheduled.length && !growItems.length) { grid.innerHTML = '<div class="empty-state">Plan your day first!</div>'; return; }
+  grid.innerHTML = '';
+
+  // Grow items at top — each already per-kid
+  if (growItems.length) {
+    const hdr = document.createElement('div');
+    hdr.style.cssText = 'font-size:0.75rem;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:#065f46;margin-bottom:4px;padding:4px 0;';
+    hdr.textContent = '🌱 Growth Objectives';
+    grid.appendChild(hdr);
+    growItems.forEach(act => {
+      const key = 'grow-' + act.kid + '-' + act.id;
+      const current = state.review[key] || null;
+      const item = document.createElement('div');
+      item.className = 'review-item';
+      item.innerHTML = `
+        <div class="time-badge" style="color:#065f46">${act.kid}</div>
+        <div class="chip-preview cat-grow">${act.icon} ${act.label}</div>
+        <div class="pts-badge"><em>+${act.pts}pt</em></div>
+        <div class="toggle-row">
+          <button class="outcome-btn yes ${current==='yes'?'active':''}" onclick="setOutcome(this,'${key}','yes')">✅ Done</button>
+          <button class="outcome-btn no  ${current==='no' ?'active':''}" onclick="setOutcome(this,'${key}','no')">❌ Missed</button>
+        </div>`;
+      grid.appendChild(item);
+    });
+  }
+
+  // Scheduled activities — two sets of buttons per row
+  if (scheduled.length) {
+    const hdr = document.createElement('div');
+    hdr.style.cssText = 'font-size:0.75rem;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:#9ca3af;margin:12px 0 4px;padding:4px 0;';
+    hdr.textContent = '📋 Today\'s Activities';
+    grid.appendChild(hdr);
+
+    // Column headers
+    const colHdr = document.createElement('div');
+    colHdr.style.cssText = 'display:grid;grid-template-columns:60px 1fr 60px 1fr 1fr;gap:8px;padding:2px 16px 6px;font-size:0.72rem;font-weight:700;color:#9ca3af;';
+    colHdr.innerHTML = '<span></span><span></span><span></span><span style="color:#a78bfa">Adeline</span><span style="color:#f472b6">Amelia</span>';
+    grid.appendChild(colHdr);
+
+    scheduled.sort((a,b) => Number(a[0]) - Number(b[0]));
+    scheduled.forEach(([slotIdx, act]) => {
+      const isDed = act.cat === 'ded';
+      const ptLabel = isDed ? `${act.pts}pt` : `+${act.pts}pt`;
+      const kids = ['adeline','amelia'];
+
+      const item = document.createElement('div');
+      item.className = 'review-item';
+      item.style.cssText = 'display:grid;grid-template-columns:60px 1fr 60px 1fr 1fr;gap:8px;align-items:center;';
+
+      const doneBtn  = isDed ? '⚠️ Happened' : '✅ Done';
+      const missBtn  = isDed ? '✅ All Good'  : '❌ Missed';
+      const partBtn  = !isDed ? `<button class="outcome-btn partial" onclick="setOutcome(this,'${slotIdx}-adeline','partial')">🔸</button>` : '';
+      const partBtnB = !isDed ? `<button class="outcome-btn partial" onclick="setOutcome(this,'${slotIdx}-amelia','partial')">🔸</button>` : '';
+
+      const cA = state.review[slotIdx + '-adeline'] || null;
+      const cB = state.review[slotIdx + '-amelia']  || null;
+
+      item.innerHTML = `
+        <div class="time-badge">${slotLabel(Number(slotIdx))}</div>
+        <div class="chip-preview cat-${act.cat}" style="font-size:0.82rem">${act.icon} ${act.label}</div>
+        <div class="pts-badge"><em>${ptLabel}</em></div>
+        <div class="toggle-row" style="flex-wrap:wrap;gap:4px;">
+          <button class="outcome-btn yes ${cA==='yes'?'active':''}" onclick="setOutcome(this,'${slotIdx}-adeline','yes')">${doneBtn}</button>
+          ${!isDed ? `<button class="outcome-btn partial ${cA==='partial'?'active':''}" onclick="setOutcome(this,'${slotIdx}-adeline','partial')">🔸</button>` : ''}
+          <button class="outcome-btn no  ${cA==='no' ?'active':''}" onclick="setOutcome(this,'${slotIdx}-adeline','no')">${missBtn}</button>
+        </div>
+        <div class="toggle-row" style="flex-wrap:wrap;gap:4px;">
+          <button class="outcome-btn yes ${cB==='yes'?'active':''}" onclick="setOutcome(this,'${slotIdx}-amelia','yes')">${doneBtn}</button>
+          ${!isDed ? `<button class="outcome-btn partial ${cB==='partial'?'active':''}" onclick="setOutcome(this,'${slotIdx}-amelia','partial')">🔸</button>` : ''}
+          <button class="outcome-btn no  ${cB==='no' ?'active':''}" onclick="setOutcome(this,'${slotIdx}-amelia','no')">${missBtn}</button>
+        </div>`;
+      grid.appendChild(item);
+    });
+  }
+}
+
+function setOutcome(btn, slotIdx, outcome) {
+  state.review[slotIdx] = outcome;
+  saveState(state);
+  btn.closest('.toggle-row').querySelectorAll('.outcome-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+function markAll(outcome) {
+  Object.keys(state.schedule).forEach(k => {
+    state.review[k + '-adeline'] = outcome;
+    state.review[k + '-amelia']  = outcome;
+  });
+  // also mark grow items
+  ['adeline','amelia'].forEach(kid => {
+    (state.grow[kid] || []).forEach(a => { state.review['grow-' + kid[0].toUpperCase() + kid.slice(1) + '-' + a.id] = outcome; });
+  });
+  saveState(state);
+  renderReview();
+}
+
+function saveReview() {
+  const total = calcTodayPoints();
+  const earned = total >= TREAT_THRESHOLD;
+  state.weekDays[today.getDay()] = earned;
+  saveState(state);
+  showToast(earned ? `🎉 ${total} points! Treat earned! 🍦` : `${total} points saved — keep it up!`);
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab')[2].classList.add('active');
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-score').classList.add('active');
+  renderScore();
+}
+
+// ── SCORE ─────────────────────────────────────────────────
+function calcTodayPoints() {
+  return calcKidPoints('adeline') + calcKidPoints('amelia');
+}
+
+function calcKidPoints(kid) {
+  return Object.entries(state.review).reduce((sum, [key, outcome]) => {
+    if (outcome === 'no') return sum;
+    // Grow key: 'grow-Adeline-id' or 'grow-Amelia-id'
+    if (String(key).startsWith('grow-')) {
+      const parts = key.split('-');
+      if (parts[1].toLowerCase() !== kid) return sum;
+      const id  = parts[2];
+      const act = (state.grow[kid] || []).find(a => a.id === id);
+      if (!act) return sum;
+      return sum + (outcome === 'yes' ? act.pts : 0);
+    }
+    // Per-kid activity: 'slotIdx-kid'
+    const kidMatch = String(key).match(/^(\d+)-(adeline|amelia)$/);
+    if (kidMatch && kidMatch[2] === kid) {
+      const act = state.schedule[kidMatch[1]];
+      if (!act) return sum;
+      const pts = act.pts || 1;
+      if (pts < 0) return sum + (outcome === 'yes' ? pts : 0);
+      return sum + (outcome === 'yes' ? pts : outcome === 'partial' ? Math.ceil(pts / 2) : 0);
+    }
+    return sum;
+  }, 0);
+}
+
+function kidScoreRows(kid) {
+  const scheduled = Object.entries(state.schedule).sort((a,b) => Number(a[0])-Number(b[0]));
+  const growActs  = (state.grow[kid] || []);
+  const rows = [];
+
+  // Grow rows
+  growActs.forEach(act => {
+    const key = 'grow-' + kid[0].toUpperCase() + kid.slice(1) + '-' + act.id;
+    const outcome = state.review[key];
+    const earned  = outcome === 'yes' ? act.pts : 0;
+    const pillClass = outcome === 'yes' ? 'pts-done' : outcome === 'no' ? 'pts-missed' : '';
+    const lbl = outcome === 'yes' ? '✅' : outcome === 'no' ? '❌' : '—';
+    rows.push(`<tr><td>${act.icon} ${act.label}</td><td>${lbl}</td><td><span class="pts-pill ${pillClass}">${earned}pt</span></td></tr>`);
+  });
+
+  // Activity rows
+  scheduled.forEach(([slotIdx, act]) => {
+    const outcome = state.review[slotIdx + '-' + kid];
+    const pts = act.pts || 1;
+    const earned = outcome === 'yes' ? pts : outcome === 'partial' ? Math.ceil(pts/2) : pts < 0 && outcome === 'yes' ? pts : 0;
+    const pillClass = outcome === 'yes' ? (pts < 0 ? 'pts-missed' : 'pts-done') : outcome === 'partial' ? 'pts-partial' : outcome === 'no' ? (pts < 0 ? 'pts-done' : 'pts-missed') : '';
+    const lbl = outcome === 'yes' ? (pts < 0 ? '⚠️' : '✅') : outcome === 'partial' ? '🔸' : outcome === 'no' ? (pts < 0 ? '✅' : '❌') : '—';
+    const earnedDisplay = pts < 0 && outcome === 'yes' ? pts : outcome === 'yes' ? pts : outcome === 'partial' ? Math.ceil(pts/2) : 0;
+    rows.push(`<tr><td style="font-size:0.82rem">${act.icon} ${act.label} <span style="color:#9ca3af;font-size:0.7rem">${slotLabel(Number(slotIdx))}</span></td><td>${lbl}</td><td><span class="pts-pill ${pillClass}">${earnedDisplay}pt</span></td></tr>`);
+  });
+
+  return rows.length ? rows.join('') : '<tr><td colspan="3" style="color:#9ca3af;padding:12px;text-align:center;font-size:0.82rem">Nothing scored yet</td></tr>';
+}
+
+function renderScore() {
+  const adelinePts = calcKidPoints('adeline');
+  const ameliaPts  = calcKidPoints('amelia');
+  document.getElementById('adelinePointsDisplay').textContent = adelinePts + ' pts';
+  document.getElementById('ameliaPointsDisplay').textContent  = ameliaPts  + ' pts';
+  document.getElementById('adelineRows').innerHTML = kidScoreRows('adeline');
+  document.getElementById('ameliaRows').innerHTML  = kidScoreRows('amelia');
+
+  // Per-kid treat bars
+  [['adeline','A'], ['amelia','B']].forEach(([kid, suffix]) => {
+    const pts = kid === 'adeline' ? adelinePts : ameliaPts;
+    const pct = Math.min(100, Math.round(pts / TREAT_THRESHOLD * 100));
+    const earnedKid = pts >= TREAT_THRESHOLD;
+    document.getElementById('treatBarFill' + suffix).style.width = pct + '%';
+    document.getElementById('treatPct'     + suffix).textContent  = pct + '%';
+    document.getElementById('treatLabel'   + suffix).textContent  = earnedKid ? '🎉 Treat earned!' : `${pts} / ${TREAT_THRESHOLD} points`;
+    document.getElementById('treatStatus'  + suffix).textContent  = earnedKid ? 'Amazing job! 🌟' : `${TREAT_THRESHOLD - pts} more to go!`;
+  });
+
+  const earnedA = adelinePts >= TREAT_THRESHOLD;
+  const earnedB = ameliaPts  >= TREAT_THRESHOLD;
+  const total   = adelinePts + ameliaPts;
+
+  const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const dow  = today.getDay();
+  document.getElementById('weeklyRow').innerHTML = days.map((d,i) => {
+    const cls   = i < dow ? (state.weekDays[i] ? 'earned' : '') : i === dow ? 'today' : '';
+    const inner = i === dow ? ((earnedA || earnedB) ? '⭐' : total) : (state.weekDays[i] ? '⭐' : '');
+    return `<div class="day-pip"><div class="circle ${cls}">${inner}</div>${d}</div>`;
+  }).join('');
+
+  const treatDays = state.weekDays.filter(Boolean).length;
+  document.getElementById('weeklyPtsDisplay').textContent = total + ' pts today';
+  document.getElementById('tier1').innerHTML = (earnedA || earnedB) ? '🔓 <span style="color:#34d399">Earned!</span>'    : '🔒 Locked';
+  document.getElementById('tier2').innerHTML = treatDays >= 3       ? '🔓 <span style="color:#34d399">Unlocked!</span>' : `🔒 ${treatDays}/3 days`;
+  document.getElementById('tier3').innerHTML = treatDays >= 5       ? '🔓 <span style="color:#34d399">Unlocked!</span>' : `🔒 ${treatDays}/5 days`;
+}
+
+// ── GROWTH DROPS ──────────────────────────────────────────
+function initGrowthDrops() {
+  ['adeline','amelia'].forEach(kid => {
+    const zone = document.getElementById('growDrop-' + kid);
+    renderGrowChips(kid);
+
+    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+    zone.addEventListener('drop', e => {
+      e.preventDefault();
+      zone.classList.remove('drag-over');
+      const raw = e.dataTransfer.getData('text/plain');
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      if (data.cat !== 'grow') return; // only grow activities allowed here
+      // avoid duplicates
+      if (state.grow[kid].find(a => a.id === data.id)) return;
+      state.grow[kid].push({ id: data.id, label: data.label, icon: data.icon, pts: data.pts });
+      saveState(state);
+      renderGrowChips(kid);
+    });
+  });
+}
+
+function renderGrowChips(kid) {
+  const zone = document.getElementById('growDrop-' + kid);
+  zone.innerHTML = '';
+  (state.grow[kid] || []).forEach(act => {
+    const chip = document.createElement('div');
+    chip.className = 'grow-chip-placed';
+    chip.innerHTML = `${act.icon} ${act.label} <em style="font-weight:400;margin-left:2px">+${act.pts}pt</em><button class="remove-btn">✕</button>`;
+    chip.querySelector('.remove-btn').addEventListener('click', () => {
+      state.grow[kid] = state.grow[kid].filter(a => a.id !== act.id);
+      saveState(state);
+      renderGrowChips(kid);
+    });
+    zone.appendChild(chip);
+  });
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+buildCalendar();
+initBankDrag();
+initGrowthDrops();
+initFirebase(); // connect to cloud; will refresh calendar if remote data exists
+</script>
+</body>
+</html>
